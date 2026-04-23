@@ -199,9 +199,10 @@ jobs:
           }
           EOF
           FUZZ_INTROSPECTOR=1 \
+          FUZZ_INTROSPECTOR_FORCE_RUN=1 \
           FUZZINTRO_OUTDIR=/tmp/fi_lto_out \
           FI_BRANCH_PROFILE=1 \
-            $CLANG -flto -g -O1 -include stdint.h \
+            $CLANG -flto -g -O1 -fno-inline -include stdint.h \
               frontends/llvm/../../tests/cpp-simple-example-1/fuzzer.cpp \
               /tmp/fi_lto_main.cpp \
               -o /tmp/fi_lto_out/fuzzer_lto \
