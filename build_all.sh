@@ -18,7 +18,7 @@ set -ex
 BASE=$PWD
 BUILD_BASE=$BASE/build
 
-if [ -d $BUILD_BASE ]; then
+if [ -d $BUILD_BASE/llvm-project ]; then
   echo "Reusing set up (LLVM Source). Updating the LLVM plugin"
   rm -rf $BUILD_BASE/llvm-project/llvm/include/llvm/Transforms/FuzzIntrospector
   rm -rf $BUILD_BASE/llvm-project/llvm/lib/Transforms/FuzzIntrospector
@@ -26,32 +26,18 @@ if [ -d $BUILD_BASE ]; then
   cp -rf ${BASE}/frontends/llvm/lib/Transforms/FuzzIntrospector $BUILD_BASE/llvm-project/llvm/lib/Transforms/FuzzIntrospector
 
   cd $BUILD_BASE/llvm-build
-  cmake -G "Unix Makefiles" -DLLVM_ENABLE_PROJECTS="clang;compiler-rt"  \
-        -DLLVM_BINUTILS_INCDIR=../binutils/include \
+  cmake -G Ninja \
+        -DLLVM_ENABLE_PROJECTS="clang;lld" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DLLVM_TARGETS_TO_BUILD="X86" ../llvm-project/llvm/
-  make -j5 llvm-headers
-  make -j10
-  make
+        -DLLVM_TARGETS_TO_BUILD="X86" \
+        -DLLVM_ENABLE_RTTI=ON \
+        -DLLVM_INCLUDE_TESTS=OFF \
+        -DLLVM_INCLUDE_BENCHMARKS=OFF \
+        ../llvm-project/llvm/
+  ninja clang lld
 else
-  echo "Cloning and building binutild-gdb and LLVM from scratch."
-  mkdir $BUILD_BASE
-
-  # Build  binutils
-  cd $BUILD_BASE
-  git clone --depth 1 https://github.com/bminor/binutils-gdb binutils
-
-  # Remove some directories we don't need
-  cd binutils
-  rm -rf ./gcc
-  rm -rf ./gdb
-  cd ../
-
-  # Build gold
-  mkdir build
-  cd ./build
-  ../binutils/configure --enable-gold --enable-plugins --disable-werror
-  make all-gold
+  echo "Cloning and building LLVM from scratch."
+  mkdir -p $BUILD_BASE
 
   # Now build LLVM
   cd ${BUILD_BASE}
@@ -71,11 +57,13 @@ else
   cd ${BUILD_BASE}
   mkdir llvm-build
   cd llvm-build
-  cmake -G "Unix Makefiles" -DLLVM_ENABLE_PROJECTS="clang;compiler-rt"  \
-        -DLLVM_BINUTILS_INCDIR=../binutils/include \
+  cmake -G Ninja \
+        -DLLVM_ENABLE_PROJECTS="clang;lld" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DLLVM_TARGETS_TO_BUILD="X86" ../llvm-project/llvm/
-  make llvm-headers
-  make -j5
-  make
+        -DLLVM_TARGETS_TO_BUILD="X86" \
+        -DLLVM_ENABLE_RTTI=ON \
+        -DLLVM_INCLUDE_TESTS=OFF \
+        -DLLVM_INCLUDE_BENCHMARKS=OFF \
+        ../llvm-project/llvm/
+  ninja clang lld
 fi
