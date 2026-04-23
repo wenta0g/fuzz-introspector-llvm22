@@ -11,13 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - uses: axel-op/googlejavaformat-action@v4
-        with:
-          args: "--replace"
-          skip-commit: true
-          files:
-            - 'frontends/java/**'
-            - '.github/workflows/google-java.yml'
-            - 'tools/auto-fuzz/benchmark/jvm/**'
+      - name: Download Google Java Format
+        run: |
+          wget -qO /tmp/gjf.jar \
+            "https://github.com/google/google-java-format/releases/download/v1.24.0/google-java-format-1.24.0-all-deps.jar"
+      - name: Apply Google Java Format
+        run: |
+          find frontends/java tools/auto-fuzz/benchmark/jvm -name "*.java" -print0 \
+            | xargs -0 java \
+                --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED \
+                --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED \
+                --add-exports jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED \
+                --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED \
+                --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED \
+                -jar /tmp/gjf.jar --replace
       - name: Print diffs
         run: git --no-pager diff --exit-code

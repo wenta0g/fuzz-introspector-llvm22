@@ -32,6 +32,26 @@ VER_ARG="${2:-auto}"
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Resolve the LLVM include directory for a given version.
+# Prefers llvm-config output over the hardcoded path so apt.llvm.org packages
+# work regardless of where they install headers.
+llvm_includedir() {
+    local ver="$1"
+    local cfg
+    for cfg in "llvm-config-${ver}" "llvm-config${ver}" "llvm-config"; do
+        if command -v "$cfg" &>/dev/null; then
+            local ver_out
+            ver_out=$("$cfg" --version 2>/dev/null | grep -oP '^\d+')
+            if [[ "$ver_out" == "$ver" ]]; then
+                "$cfg" --includedir
+                return
+            fi
+        fi
+    done
+    # Fallback
+    echo "/usr/lib/llvm-${ver}/include"
+}
+
 # Returns the sed pattern for patching InitializePasses.h for a given version.
 # Mirrors the logic in patch-llvm.sh (both seds are applied; one is a no-op).
 patch_initialize_passes() {
@@ -46,7 +66,10 @@ patch_initialize_passes() {
 available_versions() {
     local vers=()
     for v in 18 19 20 21 22; do
-        [[ -d "/usr/lib/llvm-$v/include" ]] && command -v "clang-$v" &>/dev/null && vers+=("$v")
+        if command -v "clang-$v" &>/dev/null; then
+            local inc; inc=$(llvm_includedir "$v")
+            [[ -f "$inc/llvm/InitializePasses.h" ]] && vers+=("$v")
+        fi
     done
     echo "${vers[@]}"
 }
@@ -56,7 +79,7 @@ available_versions() {
 # ---------------------------------------------------------------------------
 test_patch() {
     local ver="$1"
-    local inc="/usr/lib/llvm-${ver}/include"
+    local inc; inc=$(llvm_includedir "$ver")
     info "[LLVM $ver] Test: patch-llvm.sh injects initializeFuzzIntrospectorPass"
 
     [[ -f "$inc/llvm/InitializePasses.h" ]] || { info "no InitializePasses.h for LLVM $ver, skipping"; return; }
@@ -80,7 +103,7 @@ test_patch() {
 # ---------------------------------------------------------------------------
 test_syntax() {
     local ver="$1"
-    local inc="/usr/lib/llvm-${ver}/include"
+    local inc; inc=$(llvm_includedir "$ver")
     info "[LLVM $ver] Test: syntax-check FuzzIntrospector.cpp"
 
     command -v "clang-$ver" &>/dev/null || { info "clang-$ver not found, skipping"; return; }
@@ -111,7 +134,7 @@ test_syntax() {
 # ---------------------------------------------------------------------------
 test_e2e() {
     local ver="$1"
-    local inc="/usr/lib/llvm-${ver}/include"
+    local inc; inc=$(llvm_includedir "$ver")
     info "[LLVM $ver] Test: end-to-end plugin run (opt --load-pass-plugin)"
 
     command -v "clang-$ver" &>/dev/null || { info "clang-$ver not found, skipping"; return; }
