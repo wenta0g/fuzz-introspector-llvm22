@@ -50,5 +50,8 @@ else
     sed -i 's/#include "llvm\/Transforms\/Instrumentation\/ThreadSanitizer.h"/#include "llvm\/Transforms\/Instrumentation\/ThreadSanitizer.h"\n#include "llvm\/Transforms\/FuzzIntrospector\/FuzzIntrospector.h"/g' ./llvm/lib/Passes/PassBuilder.cpp
     sed -i 's/#include "llvm\/Transforms\/Instrumentation\/PGOInstrumentation.h"/#include "llvm\/Transforms\/Instrumentation\/PGOInstrumentation.h"\n#include "llvm\/Transforms\/FuzzIntrospector\/FuzzIntrospector.h"/g' ./llvm/lib/Passes/PassBuilderPipelines.cpp
     sed -i 's/MPM.addPass(CrossDSOCFIPass());/MPM.addPass(CrossDSOCFIPass());\n  MPM.addPass(FuzzIntrospectorPass());/g' ./llvm/lib/Passes/PassBuilderPipelines.cpp
+    grep -q 'FuzzIntrospectorPass' ./llvm/lib/Passes/PassBuilderPipelines.cpp || \
+        { echo "ERROR: Failed to inject FuzzIntrospectorPass into PassBuilderPipelines.cpp (CrossDSOCFIPass anchor not found)"; exit 1; }
+    echo "Verified: FuzzIntrospectorPass present in PassBuilderPipelines.cpp"
     sed -i 's/MODULE_PASS("annotation2metadata", Annotation2MetadataPass())/MODULE_PASS("annotation2metadata", Annotation2MetadataPass())\nMODULE_PASS("fuzz-introspector", FuzzIntrospectorPass())/g' ./llvm/lib/Passes/PassRegistry.def
 fi

@@ -105,8 +105,10 @@ jobs:
         id: cache-llvm
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: build/llvm-build
-          key: llvm-22.1.0-${{ hashFiles('frontends/llvm/patch-llvm.sh') }}
+          path: |
+            build/llvm-build
+            build/llvm-project
+          key: llvm-22.1.0-clang-lld-${{ hashFiles('frontends/llvm/patch-llvm.sh') }}
 
       - name: Clone LLVM source
         if: steps.cache-llvm.outputs.cache-hit != 'true'
@@ -126,14 +128,14 @@ jobs:
           cp -r $GITHUB_WORKSPACE/frontends/llvm/lib/Transforms/FuzzIntrospector \
                 llvm/lib/Transforms/
 
-      - name: Configure LLVM (X86 only, Release, clang only)
+      - name: Configure LLVM (X86 only, Release, clang + lld)
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           mkdir -p build/llvm-build
           cd build/llvm-build
           cmake -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DLLVM_ENABLE_PROJECTS="clang" \
+            -DLLVM_ENABLE_PROJECTS="clang;lld" \
             -DLLVM_TARGETS_TO_BUILD=X86 \
             -DLLVM_ENABLE_RTTI=ON \
             -DLLVM_INCLUDE_TESTS=OFF \
@@ -144,10 +146,10 @@ jobs:
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           cd build/llvm-build
-          ninja clang -j$(nproc)
+          ninja clang lld -j$(nproc)
 
       # When the cache is hit, the plugin sources may have changed — rebuild.
-      - name: Rebuild plugin (cache-hit path)
+      - name: Rebuild patched clang (cache-hit path)
         if: steps.cache-llvm.outputs.cache-hit == 'true'
         run: |
           cp -r frontends/llvm/include/llvm/Transforms/FuzzIntrospector \
@@ -155,7 +157,20 @@ jobs:
           cp -r frontends/llvm/lib/Transforms/FuzzIntrospector \
                 build/llvm-project/llvm/lib/Transforms/
           cd build/llvm-build
-          ninja LLVMFuzzIntrospector -j$(nproc)
+          ninja clang lld -j$(nproc)
+
+      - name: Verify LTO pipeline injection
+        run: |
+          echo "=== FuzzIntrospectorPass in PassBuilderPipelines.cpp ==="
+          grep -n 'FuzzIntrospectorPass' \
+            build/llvm-project/llvm/lib/Passes/PassBuilderPipelines.cpp \
+            || echo "NOT FOUND — patch did not apply to LTO pipeline"
+          echo "=== FuzzIntrospector library ==="
+          ls -la build/llvm-build/lib/libLLVMFuzzIntrospector* 2>/dev/null \
+            || echo "Library not found (not built as shared lib — OK for in-tree)"
+          echo "=== lld binary ==="
+          ls -la build/llvm-build/bin/ld.lld build/llvm-build/bin/lld 2>/dev/null \
+            || echo "lld binary not found"
 
       - name: Smoke-test patched clang
         run: |
@@ -163,20 +178,37 @@ jobs:
           echo 'int main(){}' | $CLANG -x c - -o /dev/null
           $CLANG --version
 
-      # Compile the test fuzzer with -flto so the plugin sees whole-program IR
+      # Compile the test fuzzer with -flto so the plugin sees whole-program IR.
+      # The fuzzer source has no main(), so add a tiny driver; otherwise the
+      # link fails before the LTO backend has a chance to run the pass.
       - name: Compile test fuzzer with -flto
         run: |
           CLANG=$GITHUB_WORKSPACE/build/llvm-build/bin/clang++
+          LLD_DIR=$GITHUB_WORKSPACE/build/llvm-build/bin
           mkdir -p /tmp/fi_lto_out
+          cat > /tmp/fi_lto_main.cpp <<'EOF'
+          #include <cstddef>
+          #include <cstdint>
+
+          extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
+
+          int main(int argc, char **argv) {
+            uint8_t data[1] = {0};
+            (void)argv;
+            return LLVMFuzzerTestOneInput(data, static_cast<size_t>(argc));
+          }
+          EOF
           FUZZ_INTROSPECTOR=1 \
           FUZZINTRO_OUTDIR=/tmp/fi_lto_out \
           FI_BRANCH_PROFILE=1 \
             $CLANG -flto -g -O1 -include stdint.h \
               frontends/llvm/../../tests/cpp-simple-example-1/fuzzer.cpp \
-              -o /dev/null \
-              -fuse-ld=lld 2>&1 || true
-          # Note: linking may fail without libFuzzer; what matters is that
-          # the plugin ran during compilation and produced YAML output.
+              /tmp/fi_lto_main.cpp \
+              -o /tmp/fi_lto_out/fuzzer_lto \
+              -B"$LLD_DIR" \
+              -fuse-ld=lld
+          echo "=== /tmp/fi_lto_out contents ==="
+          ls -la /tmp/fi_lto_out/
 
       - name: Check LTO plugin output
         run: |
