@@ -468,11 +468,7 @@ void FuzzIntrospector::dumpDebugCompileUnits(std::ofstream &O,
                                              DebugInfoFinder &Finder) {
   for (DICompileUnit *CU : Finder.compile_units()) {
     O << "Compile unit: ";
-#if LLVM_VERSION_MAJOR >= 22
-    auto SourceLang = CU->getSourceLanguage().getName();
-#else
     auto SourceLang = CU->getSourceLanguage();
-#endif
     auto Lang = dwarf::LanguageString(SourceLang);
     if (!Lang.empty())
       O << Lang.str();
