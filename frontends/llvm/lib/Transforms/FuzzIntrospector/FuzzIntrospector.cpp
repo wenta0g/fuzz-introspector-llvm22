@@ -2335,16 +2335,26 @@ FuzzIntrospector::getBBDebugInfo(BasicBlock *BB, DILocation *PrevLoc) {
 
   BasicBlock *CurrBB = BB;
   BranchInst *CurrBI;
-  Instruction *CurrTI, *CurrI;
+  Instruction *CurrTI;
+  Instruction *CurrI = nullptr; // Initialize to nullptr
   DILocation *CurrLoc;
-  /* TODO(David): Fix this for LLVM 21. Although I'm not 100% sure we still use this.*/
 
   // Traverse all dummy BBs associated with the previous Loc.
   do {
     CurrTI = CurrBB->getTerminator();
-    CurrI = CurrBB->getFirstNonPHIOrDbgOrLifetime(true);
-    if (CurrI == nullptr)
+    
+    // LLVM 20+ API: Returns an iterator instead of a pointer
+    auto It = CurrBB->getFirstNonPHIOrDbgOrLifetime(true);
+    
+    // Check against end() instead of nullptr
+    if (It == CurrBB->end()) {
+      CurrI = nullptr;
       break;
+    }
+    
+    // Dereference the iterator to get the raw Instruction pointer
+    CurrI = &*It;
+    
     CurrLoc = CurrI->getDebugLoc();
     CurrBI = dyn_cast<BranchInst>(CurrTI);
     if (CurrBI && !CurrBI->isConditional()) {
@@ -2355,8 +2365,14 @@ FuzzIntrospector::getBBDebugInfo(BasicBlock *BB, DILocation *PrevLoc) {
 
   // To skip the return BB in optimized CFG.
   if (dyn_cast<ReturnInst>(CurrTI)) {
-    CurrI = BB->getFirstNonPHIOrDbgOrLifetime(true);
+    auto It = BB->getFirstNonPHIOrDbgOrLifetime(true);
+    if (It != BB->end()) {
+      CurrI = &*It;
+    } else {
+      CurrI = nullptr;
+    }
   }
+  
   if (CurrI)
     Result = getInsnDebugInfo(CurrI);
   
