@@ -53,17 +53,39 @@ else
   cp -rf ${BASE}/frontends/llvm/include/llvm/Transforms/FuzzIntrospector/ ${BUILD_BASE}/llvm-project/llvm/include/llvm/Transforms/FuzzIntrospector
   cp -rf ${BASE}/frontends/llvm/lib/Transforms/FuzzIntrospector ${BUILD_BASE}/llvm-project/llvm/lib/Transforms/FuzzIntrospector
 
-  # Build LLVM
+  # Build LLVM (follow similar build instructions as in OSS-Fuzz integration)
   cd ${BUILD_BASE}
   mkdir llvm-build
   cd llvm-build
-  cmake -G Ninja \
-        -DLLVM_ENABLE_PROJECTS="clang;lld" \
+
+  cmake -G "Ninja" \
+        -DLIBCXX_ENABLE_SHARED=OFF \
+        -DLIBCXX_ENABLE_STATIC_ABI_LIBRARY=ON \
+        -DLIBCXXABI_ENABLE_SHARED=OFF \
+        -DLLVM_ENABLE_LIBCXX=ON \
+        -DLLVM_ENABLE_WARNINGS=OFF \
         -DCMAKE_BUILD_TYPE=Release \
+        -DLLVM_ENABLE_RUNTIMES="compiler-rt;libcxx;libcxxabi" \
+        -DLLVM_ENABLE_PROJECTS="clang;lld" \
         -DLLVM_TARGETS_TO_BUILD="X86" \
         -DLLVM_ENABLE_RTTI=ON \
         -DLLVM_INCLUDE_TESTS=OFF \
         -DLLVM_INCLUDE_BENCHMARKS=OFF \
+        -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
         ../llvm-project/llvm/
-  ninja clang lld
+
+  cmake -G "Ninja" \
+    -DLIBCXX_ENABLE_SHARED=OFF \
+    -DLIBCXX_ENABLE_STATIC_ABI_LIBRARY=ON \
+    -DLIBCXXABI_ENABLE_SHARED=OFF \
+    -DLLVM_ENABLE_LIBCXX=ON \
+    -DLLVM_ENABLE_WARNINGS=OFF \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_ENABLE_RUNTIMES="compiler-rt;libcxx;libcxxabi" \
+    -DLLVM_TARGETS_TO_BUILD="X86" \
+    -DLLVM_ENABLE_PROJECTS="clang;lld" \
+    -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
+    ../llvm-project/llvm/
+
+  ninja -j 4
 fi
