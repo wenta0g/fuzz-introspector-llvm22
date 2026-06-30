@@ -390,6 +390,8 @@ struct FuzzIntrospector : public ModulePass {
   std::pair<size_t, size_t> findComplexities(SmallPtrSet<BasicBlock *, 32>,
                                              SmallPtrSet<BasicBlock *, 32>,
                                              std::map<BasicBlock *, size_t>);
+  std::pair<std::string, std::string> getBranchConditionDebugInfo(
+     const BranchInst *BI);
   std::pair<std::string, std::string> getInsnDebugInfo(Instruction *I);
   std::pair<std::string, std::string> getBBDebugInfo(BasicBlock *,
                                                      DILocation *);
@@ -478,6 +480,26 @@ void FuzzIntrospector::dumpDebugCompileUnits(std::ofstream &O,
     O << '\n';
   }
 }
+
+// void FuzzIntrospector::dumpDebugCompileUnits(std::ofstream &O,
+//   DebugInfoFinder &Finder) {
+// for (DICompileUnit *CU : Finder.compile_units()) {
+// O << "Compile unit: ";
+// auto SourceLang = CU->getSourceLanguage();
+
+// // FIX: Extract the raw integer using .getName() to satisfy the LLVM 22 API
+// auto Lang = dwarf::LanguageString(SourceLang.getName());
+
+// if (!Lang.empty())
+// O << Lang.str();
+// else
+// // FIX: Also extract the raw integer here for the output stream
+// O << "unknown-language(" << SourceLang.getName() << ")";
+
+// printFile(O, CU->getFilename(), CU->getDirectory());
+// O << '\n';
+// }
+// }
 
 void FuzzIntrospector::recurseDerivedType(std::ofstream &O, DIDerivedType *T) {
   if (T == NULL) {
@@ -2114,7 +2136,9 @@ std::vector<BranchProfileEntry> FuzzIntrospector::branchProfiler(Function *F) {
       // auto Side1Comp = Complexities.second;
 
       std::pair<std::string, std::string> DbgExtracts;
-      DbgExtracts = getInsnDebugInfo((Instruction *)BI);
+      DbgExtracts = getBranchConditionDebugInfo(BI);
+      
+      // DbgExtracts = getInsnDebugInfo((Instruction *)BI);
       std::string BRstring = DbgExtracts.first;
       if (BRstring.length() == 0) {
         continue; // Failed to get debug info
@@ -2156,6 +2180,7 @@ std::vector<BranchProfileEntry> FuzzIntrospector::branchProfiler(Function *F) {
     if (SI) {
       auto SILoc = SI->getDebugLoc();
       std::pair<std::string, std::string> DbgExtracts;
+      //DbgExtracts = getBranchConditionDebugInfo(SI);
       DbgExtracts = getInsnDebugInfo((Instruction *)SI);
       std::string BRstring = DbgExtracts.first;
       std::vector<std::pair<BasicBlock *, int>> Dest_pairs;
@@ -2311,6 +2336,76 @@ std::pair<size_t, size_t> FuzzIntrospector::findComplexities(
   }
 
   return make_pair(TrueComp, FalseComp);
+}
+
+static void considerBranchLoc(DILocation *Loc, unsigned &RefLine,
+  unsigned &MinColumn, std::string &Filename,
+  bool &Found) {
+if (!Loc)
+return;
+unsigned Line = Loc->getLine();
+unsigned Col = Loc->getColumn();
+if (!Found) {
+RefLine = Line;
+MinColumn = Col;
+Filename = Loc->getFilename().str();
+Found = true;
+return;
+}
+if (Line == RefLine)
+MinColumn = std::min(MinColumn, Col);
+}
+
+static void collectConditionDebugLocs(
+Value *V, SmallPtrSet<Value *, 16> &Visited,
+unsigned &RefLine, unsigned &MinColumn, std::string &Filename, bool &Found) {
+if (!V || !Visited.insert(V).second)
+return;
+if (auto *I = dyn_cast<Instruction>(V)) {
+considerBranchLoc(I->getDebugLoc(), RefLine, MinColumn, Filename, Found);
+for (Use &U : I->operands())
+collectConditionDebugLocs(U.get(), Visited, RefLine, MinColumn, Filename,
+  Found);
+}
+}
+
+std::pair<std::string, std::string>
+FuzzIntrospector::getBranchConditionDebugInfo(const BranchInst *BI) {
+unsigned RefLine = 0;
+unsigned MinColumn = UINT_MAX;
+std::string Filename;
+bool Found = false;
+SmallPtrSet<Value *, 16> Visited;
+
+// Primary: walk the condition operand tree (icmp, and/or, calls, etc.)
+collectConditionDebugLocs(BI->getCondition(), Visited, RefLine, MinColumn,
+Filename, Found);
+
+// Secondary: scan non-PHI/non-dbg instructions before the terminator on the
+// same line. Catches cases where the condition is split across instructions
+// that aren't all reachable from a simple operand walk.
+if (DILocation *BranchLoc = BI->getDebugLoc()) {
+unsigned AnchorLine = BranchLoc->getLine();
+if (!Found) {
+RefLine = AnchorLine;
+Filename = BranchLoc->getFilename().str();
+}
+for (auto &Insn : *BI->getParent()) {
+if (&Insn == BI)
+break;
+if (isa<DbgInfoIntrinsic>(&Insn) || isa<PHINode>(&Insn))
+continue;
+DILocation *Loc = Insn.getDebugLoc();
+if (Loc && Loc->getLine() == (Found ? RefLine : AnchorLine))
+considerBranchLoc(Loc, RefLine, MinColumn, Filename, Found);
+}
+}
+
+if (!Found)
+  return getInsnDebugInfo(const_cast<Instruction *>(cast<Instruction>(BI)));
+
+std::string LineStr = std::to_string(RefLine);
+return {Filename + ":" + LineStr + "," + std::to_string(MinColumn), LineStr};
 }
 
 std::pair<std::string, std::string>
